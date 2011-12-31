@@ -5,10 +5,13 @@ package javaewah;
 * Licensed under the GPL version 3 and APL 2.0, among other licenses.
 */
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.junit.Test;
 
 import java.util.*;
 import java.io.*;
+import org.apache.lucene.search.DocIdSetIterator;
 
 public class EWAHCompressedBitmapTest {
     private static final int MEGA = 8 * 1024 * 1024;
@@ -180,7 +183,7 @@ public class EWAHCompressedBitmapTest {
     }
 
     @Test
-    public void testEWAHCompressedBitmap() {
+    public void testEWAHCompressedBitmap() throws IOException {
         System.out.println("testing EWAH");
         long zero = 0;
         long specialval = 1l | (1l << 4)|(1l << 63);
@@ -236,13 +239,14 @@ public class EWAHCompressedBitmapTest {
         }
         isTrue(x.getPositions().equals(myarray2.getPositions()));
         x = new EWAHCompressedBitmap();
-        for(Iterator<Integer> k = myarray1.iterator(); k.hasNext(); ) {
-            x.set(extracted(k).intValue());
+        int doc;
+        for(DocIdSetIterator k = myarray1.iterator(); (doc = k.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS; ) {
+            x.set(doc);
         }
 //        isTrue(x.getPositions().equals(myarray1.getPositions()));
         x = new EWAHCompressedBitmap();
-        for(Iterator<Integer> k = myarray2.iterator(); k.hasNext(); ) {
-            x.set(extracted(k).intValue());
+        for(DocIdSetIterator k = myarray2.iterator(); (doc = k.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS; ) {
+            x.set(doc);
         }
    //     isTrue(x.getPositions().equals(myarray2.getPositions()));
     }
@@ -283,6 +287,15 @@ public class EWAHCompressedBitmapTest {
         for(int k = 0; k<val.length; ++k) {
             isTrue(result.get(k).intValue()==val[k]);
         }
+        
+        for(int k = 0; k<val.length; ++k) {
+            isTrue(ewcb.get(val[k]));
+        }
+                
+        // very inefficient retrieval
+        for(int k = val.length - 1; k>=0; --k) {
+            isTrue(ewcb.get(val[k]));
+        }
     }
 
     @Test
@@ -307,12 +320,17 @@ public class EWAHCompressedBitmapTest {
             isTrue(result.get(k).intValue()==val[k]);
         }
     }
-    static void equal(Iterator<Integer> i, int[] array) {
+    static void equal(DocIdSetIterator i, int[] array) {
         int cursor = 0;
-        while(i.hasNext()) {
-            int x = extracted(i).intValue();
-            int y = array[cursor++];
-            if( x != y  ) throw new RuntimeException(x+" != "+y);
+        int doc;
+        try {
+            while((doc = i.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS ) {
+                int x = doc;
+                int y = array[cursor++];
+                if( x != y  ) throw new RuntimeException(x+" != "+y);
+            }
+        } catch (IOException ex) {
+            Logger.getLogger(EWAHCompressedBitmapTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
@@ -341,7 +359,7 @@ public class EWAHCompressedBitmapTest {
 
 
     // a non-deterministic test proposed by Marc Polizzi
-    public static void PolizziTest(int maxlength) {
+    public static void PolizziTest(int maxlength) throws IOException {
         System.out.println("Polizzi test with max length = "+maxlength);
         for(int k = 0; k<10000; ++k) {
             final Random rnd = new Random();
@@ -415,7 +433,7 @@ public class EWAHCompressedBitmapTest {
     }
 
     // part of a test contributed by Marc Polizzi
-    static void assertEquals(BitSet jdkBitmap, EWAHCompressedBitmap ewahBitmap) {
+    static void assertEquals(BitSet jdkBitmap, EWAHCompressedBitmap ewahBitmap) throws IOException {
         assertEqualsIterator(jdkBitmap, ewahBitmap);
         assertEqualsPositions(jdkBitmap, ewahBitmap);
         assertCardinality(jdkBitmap, ewahBitmap);
@@ -434,11 +452,12 @@ public class EWAHCompressedBitmapTest {
 
 
     // part of a test contributed by Marc Polizzi
-    static void assertEqualsIterator(BitSet jdkBitmap, EWAHCompressedBitmap ewahBitmap) {
-        final Vector<Integer> positions = new Vector<Integer>();
-        final Iterator<Integer> bits = ewahBitmap.iterator();
-        while (bits.hasNext()) {
-            final int bit = extracted(bits).intValue();
+    static void assertEqualsIterator(BitSet jdkBitmap, EWAHCompressedBitmap ewahBitmap) throws IOException {
+        final List<Integer> positions = new ArrayList<Integer>();
+        final DocIdSetIterator iter = ewahBitmap.iterator();
+        int doc;
+        while ((doc = iter.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+            final int bit = doc;
             if (!jdkBitmap.get(bit)) {
                 throw new RuntimeException("iterator: bitset got different bits");
             }
@@ -449,12 +468,7 @@ public class EWAHCompressedBitmapTest {
                 throw new RuntimeException("iterator: bitset got different bits");
             }
         }
-    }
-
-
-	private static Integer extracted(final Iterator<Integer> bits) {
-		return bits.next();
-	}
+    }	
 
     // part of a test contributed by Marc Polizzi
     static void assertEqualsPositions(BitSet jdkBitmap, EWAHCompressedBitmap ewahBitmap) {
@@ -495,7 +509,7 @@ public class EWAHCompressedBitmapTest {
     }
 
     @Test
-    public void testMassiveXOR() {
+    public void testMassiveXOR() throws IOException {
         System.out.println("testing massive xor");
         final int N = 128;
         EWAHCompressedBitmap[] ewah = new EWAHCompressedBitmap[N];
@@ -514,10 +528,12 @@ public class EWAHCompressedBitmapTest {
             assertEqualsPositions(bitsetanswer, answer);
         }
         int k = 0;
-        for(int j : answer) {
-            if(k!=j)
+        int doc;
+        for(DocIdSetIterator iter = answer.iterator(); 
+                (doc = iter.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS;) {
+            if(k!=doc)
                 System.out.println(answer.toDebugString());
-            equal(k,j);
+            equal(k,doc);
             k+=1;
         }
     }
@@ -548,7 +564,7 @@ public class EWAHCompressedBitmapTest {
     }
 
     @Test
-    public void testMassiveOr() {
+    public void testMassiveOr() throws IOException {
         System.out.println("testing massive logical or");
         final int N = 1024;
         for(int howmany = 512; howmany <=10000; howmany *=2){
@@ -574,10 +590,12 @@ public class EWAHCompressedBitmapTest {
 	        }
 	        assertEqualsPositions(bitsetanswer, answer);
 	        int k = 0;
-	        for(int j : answer) {
-	            if(k!=j)
+                int doc;
+                for(DocIdSetIterator iter = answer.iterator(); 
+                        (doc = iter.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS;) {
+	            if(k!=doc)
 	                System.out.println(answer.toDebugString());
-	            equal(k,j);
+	            equal(k,doc);
 	            k+=1;
 	        }
         }

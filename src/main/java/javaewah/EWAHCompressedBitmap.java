@@ -39,11 +39,19 @@ package javaewah;
 *    schemes, like WAH are covered by patents.
 */
 
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
 import java.util.*;
-import java.io.*;
+import org.apache.lucene.search.DocIdSet;
+import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.util.Bits;
 
 
-public final class EWAHCompressedBitmap implements Cloneable, Externalizable, Iterable<Integer> {
+public final class EWAHCompressedBitmap extends DocIdSet implements Bits, Cloneable, Externalizable /* conflict with DocIdSet, Iterable<Integer> */ {
 
 	/**
 	 * Creates an empty bitmap (not bit set to true).
@@ -915,7 +923,7 @@ public final class EWAHCompressedBitmap implements Cloneable, Externalizable, It
     /**
     * iterate over the positions of the true values.
     */
-    public Iterator<Integer> iterator() {
+    public Iterator<Integer> integerIterator() {
     	return new Iterator<Integer>() {
     		final private IntIterator under = intIterator();
     		
@@ -1024,5 +1032,60 @@ public final class EWAHCompressedBitmap implements Cloneable, Externalizable, It
     RunningLengthWord rlw = null;
     public static final int wordinbits = 64;
 
+    @Override
+    public DocIdSetIterator iterator() {
+        return new DocIdSetIterator() {
+            final private IntIterator under = intIterator();
+            int docID;
+            
+            @Override 
+            public int docID() {
+                return docID;
+            }
 
+            @Override
+            public int nextDoc() throws IOException {                
+                if(under.hasNext())
+                    return docID = under.next();
+                else
+                    return docID = DocIdSetIterator.NO_MORE_DOCS;
+            }
+
+            @Override
+            public int advance(int target) throws IOException {
+                // we can do faster! -> wordinbits
+                while ((docID = nextDoc()) < target) {
+                }
+                return docID;
+            }
+        };
+    }
+
+    IntIterator lastIter;
+    int lastIndex = -1;
+    int lastInt;
+    
+    /**
+     * WARN: only retrieval in ascending index order is optimal
+     * TODO: not thread safe -> use lastIter per thread?
+     */
+    public boolean get(int index) {
+        if(index < 0)
+            throw new ArrayIndexOutOfBoundsException("negative indices are not allowed");
+        
+        if(lastIndex < 0 || index < lastIndex) {
+            lastIter = intIterator();            
+            lastInt = -1;
+        }
+        lastIndex = index;
+        
+        while(lastIter.hasNext() && lastInt < index) {
+            lastInt = lastIter.next();
+        }
+        return index == lastInt;
+    }
+
+    public int length() {
+        return sizeinbits;
+    }
 }
